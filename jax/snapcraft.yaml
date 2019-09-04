@@ -1,0 +1,56 @@
+name: jetson-jax-kernel
+version: 4.9-tegra-l4t-r32.1
+summary: nvidia Jetson JAX kernel
+description: nvidia Jetson JAX kernel
+grade: stable
+confinement: strict
+type: kernel
+base: core18
+architectures: [ arm64 ]
+
+parts:
+  kernel:
+    plugin: nil
+    source: ../src
+    override-pull: |
+      snapcraftctl pull
+      # Get kernel sources, which are distributed across different repos
+      mv l4t_32.1.0/source_sync.sh .
+      ./source_sync.sh -k tegra-l4t-r32.1
+      # Apply canonical patches - apparmor stuff essentially
+      cd sources/kernel/kernel-4.9
+      git am ../../../l4t_32.1.0/patch/*
+    override-build: |
+      JETSON_KERNEL_CONFIG=tegra_defconfig ./build.sh
+    build-packages:
+      - lsb-release
+      - bc
+      - git
+      - libssl-dev
+      - rsync
+      - lzop
+      - gcc-aarch64-linux-gnu
+      - jq
+      - squashfs-tools
+      - curl
+      - build-essential
+
+  firmware:
+    after: [ kernel ]
+    plugin: nil
+    override-build: |
+      set -xe
+      wget https://developer.nvidia.com/embedded/dlc/l4t-jetson-driver-package-32-1-JAX-TX2 \
+        -O JAX-TX2-Jetson_Linux_R32.1.0_aarch64.tbz2
+      tar xf JAX-TX2-Jetson_Linux_R32.1.0_aarch64.tbz2 Linux_for_Tegra/nv_tegra/nvidia_drivers.tbz2
+      tar xf Linux_for_Tegra/nv_tegra/nvidia_drivers.tbz2 lib/firmware/
+      cd lib; cp -r firmware/ "$SNAPCRAFT_PART_INSTALL"
+
+  initramfs:
+    after: [ kernel, firmware ]
+    plugin: nil
+    source: ../initramfs
+    override-build: |
+      mkdir -p lib/firmware
+      cp "$SNAPCRAFT_STAGE"/firmware/tegra*_xusb_firmware lib/firmware/
+      find . | cpio --quiet -o -H newc | lzma >> "$SNAPCRAFT_STAGE"/initrd.img
